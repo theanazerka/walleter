@@ -3,6 +3,7 @@
 #import "WLBarcodeRenderer.h"
 #import "WLColors.h"
 #import "WLIcon.h"
+#import "WLBrand.h"
 #import <UIKit/UIKit.h>
 #import <CommonCrypto/CommonDigest.h>
 
@@ -88,6 +89,11 @@ static NSData *WLPNG(UIImage *image) {
         pass[@"barcode"] = @{ @"format": nativeFormat, @"message": message, @"messageEncoding": [message canBeConvertedToEncoding:NSISOLatin1StringEncoding] ? @"iso-8859-1" : @"utf-8", @"altText": message };
     }
 
+    if ([card customLogo] || card.brand.logo) {
+        // на логотипе уже есть название — logoText не дублируем
+        [pass removeObjectForKey:@"logoText"];
+    }
+
     NSError *jsonError = nil;
     NSData *passJSON = [NSJSONSerialization dataWithJSONObject:pass options:0 error:&jsonError];
     if (!passJSON) {
@@ -100,14 +106,25 @@ static NSData *WLPNG(UIImage *image) {
     files[@"icon.png"] = WLPNG([card iconWithSide:29 scale:1]);
     files[@"icon@2x.png"] = WLPNG([card iconWithSide:29 scale:2]);
 
-    // Логотип слева сверху: свой — вписываем в 160x30, иначе квадратный значок магазина
+    // Логотип слева сверху (до 160x50 pt):
+    //  свой — вписываем в 160x30; логотип магазина — на белой плашке (читается на любом фоне);
+    //  иначе — квадратный буквенный значок.
     UIImage *custom = [card customLogo];
+    UIImage *brandLogo = custom ? nil : card.brand.logo;
     for (NSNumber *scale in @[ @1, @2 ]) {
-        UIImage *logo = custom ? WLFitImage(custom, CGSizeMake(160, 30), scale.floatValue)
-                               : [card iconWithSide:30 scale:scale.floatValue];
-        files[scale.intValue == 2 ? @"logo@2x.png" : @"logo.png"] = WLPNG(logo);
+        CGFloat k = scale.floatValue;
+        UIImage *logo;
+        if (custom) {
+            logo = WLFitImage(custom, CGSizeMake(160, 30), k);
+        } else if (brandLogo) {
+            CGSize ls = brandLogo.size;
+            CGFloat w = MIN(150, MAX(30, 30 * 0.76 * ls.width / MAX(ls.height, 1) + 30 * 0.24));
+            logo = WLBadgeImage(brandLogo, CGSizeMake(round(w), 30), k, 6);
+        } else {
+            logo = [card iconWithSide:30 scale:k];
+        }
+        files[k == 2 ? @"logo@2x.png" : @"logo.png"] = WLPNG(logo);
     }
-
     if (linear) {
         NSString *modules = nil;
         switch (card.barcodeFormat) {
