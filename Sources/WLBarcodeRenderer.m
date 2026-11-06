@@ -40,6 +40,15 @@ static int WLEANCheckDigit(NSString *twelve) {
     return (10 - sum % 10) % 10;
 }
 
+static int WLEAN8CheckDigit(NSString *seven) {
+    int sum = 0;
+    for (NSUInteger i = 0; i < 7; i++) {
+        int d = [seven characterAtIndex:i] - '0';
+        sum += (i % 2 == 0) ? d * 3 : d;
+    }
+    return (10 - sum % 10) % 10;
+}
+
 static NSString *WLStripSpaces(NSString *s) {
     return [[s componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] componentsJoinedByString:@""];
 }
@@ -61,6 +70,24 @@ static NSString *WLStripSpaces(NSString *s) {
     NSString *n = WLStripSpaces(number);
     if ([self ean13ValidationError:n]) return nil;
     if (n.length == 12) n = [n stringByAppendingFormat:@"%d", WLEANCheckDigit(n)];
+    return n;
+}
+
++ (NSString *)ean8ValidationError:(NSString *)number {
+    NSString *n = WLStripSpaces(number);
+    if (!WLIsDigits(n) || (n.length != 7 && n.length != 8)) {
+        return @"EAN-8 — это 8 цифр (или 7 без контрольной).";
+    }
+    if (n.length == 8 && WLEAN8CheckDigit(n) != [n characterAtIndex:7] - '0') {
+        return [NSString stringWithFormat:@"Контрольная цифра EAN-8 не сходится (ожидается %d).", WLEAN8CheckDigit(n)];
+    }
+    return nil;
+}
+
++ (NSString *)ean8FullNumber:(NSString *)number {
+    NSString *n = WLStripSpaces(number);
+    if ([self ean8ValidationError:n]) return nil;
+    if (n.length == 7) n = [n stringByAppendingFormat:@"%d", WLEAN8CheckDigit(n)];
     return n;
 }
 
@@ -87,6 +114,17 @@ static NSString *WLStripSpaces(NSString *s) {
     for (int i = 7; i <= 12; i++) {
         [m appendString:@(kEANR[[n characterAtIndex:i] - '0'])];
     }
+    [m appendString:@"101"];
+    return m;
+}
+
++ (NSString *)ean8Modules:(NSString *)number {
+    NSString *n = [self ean8FullNumber:number];
+    if (!n) return nil;
+    NSMutableString *m = [NSMutableString stringWithString:@"101"];
+    for (int i = 0; i < 4; i++) [m appendString:@(kEANL[[n characterAtIndex:i] - '0'])];
+    [m appendString:@"01010"];
+    for (int i = 4; i < 8; i++) [m appendString:@(kEANR[[n characterAtIndex:i] - '0'])];
     [m appendString:@"101"];
     return m;
 }
