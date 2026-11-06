@@ -2,6 +2,7 @@
 #import "WLZipWriter.h"
 #import "WLBarcodeRenderer.h"
 #import "WLColors.h"
+#import "WLIcon.h"
 #import <UIKit/UIKit.h>
 #import <CommonCrypto/CommonDigest.h>
 
@@ -15,18 +16,7 @@ static NSString *WLSHA1(NSData *data) {
     return hex;
 }
 
-static NSData *WLIconPNG(WLCard *card, CGFloat side, CGFloat scale) {
-    UIGraphicsBeginImageContextWithOptions(CGSizeMake(side, side), NO, scale);
-    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, side, side) cornerRadius:side * 0.2];
-    [WLColorBackground(card.colorIndex) setFill];
-    [path fill];
-    NSString *letter = card.storeName.length ? [[card.storeName substringToIndex:1] uppercaseString] : @"W";
-    UIFont *font = [UIFont boldSystemFontOfSize:side * 0.6];
-    CGSize textSize = [letter sizeWithFont:font];
-    [WLColorForeground(card.colorIndex) setFill];
-    [letter drawAtPoint:CGPointMake((side - textSize.width) / 2, (side - textSize.height) / 2) withFont:font];
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
+static NSData *WLPNG(UIImage *image) {
     return UIImagePNGRepresentation(image);
 }
 
@@ -40,15 +30,18 @@ static NSData *WLIconPNG(WLCard *card, CGFloat side, CGFloat scale) {
     }
 
     NSString *message = [card normalizedBarcodeMessage];
-    UIColor *bg = WLColorBackground(card.colorIndex);
-    UIColor *fg = WLColorForeground(card.colorIndex);
+    UIColor *bg = card.backgroundColor;
+    UIColor *fg = card.foregroundColor;
 
     NSMutableDictionary *storeCard = [NSMutableDictionary dictionary];
     NSMutableArray *secondary = [NSMutableArray array];
     NSMutableArray *auxiliary = [NSMutableArray array];
     NSMutableArray *back = [NSMutableArray array];
 
-    [secondary addObject:@{ @"key": @"number", @"label": @"НОМЕР КАРТЫ", @"value": message }];
+    // длинное содержимое QR (ссылки и т.п.) на лицевой стороне не показываем
+    if (message.length <= 24) {
+        [secondary addObject:@{ @"key": @"number", @"label": @"НОМЕР КАРТЫ", @"value": message }];
+    }
     if (card.holderName.length) {
         [auxiliary addObject:@{ @"key": @"holder", @"label": @"ВЛАДЕЛЕЦ", @"value": card.holderName }];
     }
@@ -92,7 +85,7 @@ static NSData *WLIconPNG(WLCard *card, CGFloat side, CGFloat scale) {
         default: break;
     }
     if (nativeFormat) {
-        pass[@"barcode"] = @{ @"format": nativeFormat, @"message": message, @"messageEncoding": @"iso-8859-1", @"altText": message };
+        pass[@"barcode"] = @{ @"format": nativeFormat, @"message": message, @"messageEncoding": [message canBeConvertedToEncoding:NSISOLatin1StringEncoding] ? @"iso-8859-1" : @"utf-8", @"altText": message };
     }
 
     NSError *jsonError = nil;
@@ -104,13 +97,24 @@ static NSData *WLIconPNG(WLCard *card, CGFloat side, CGFloat scale) {
 
     NSMutableDictionary *files = [NSMutableDictionary dictionary];
     files[@"pass.json"] = passJSON;
-    files[@"icon.png"] = WLIconPNG(card, 29, 1);
-    files[@"icon@2x.png"] = WLIconPNG(card, 29, 2);
+    files[@"icon.png"] = WLPNG([card iconWithSide:29 scale:1]);
+    files[@"icon@2x.png"] = WLPNG([card iconWithSide:29 scale:2]);
+
+    // Логотип слева сверху: свой — вписываем в 160x30, иначе квадратный значок магазина
+    UIImage *custom = [card customLogo];
+    for (NSNumber *scale in @[ @1, @2 ]) {
+        UIImage *logo = custom ? WLFitImage(custom, CGSizeMake(160, 30), scale.floatValue)
+                               : [card iconWithSide:30 scale:scale.floatValue];
+        files[scale.intValue == 2 ? @"logo@2x.png" : @"logo.png"] = WLPNG(logo);
+    }
 
     if (linear) {
-        NSString *modules = card.barcodeFormat == WLBarcodeFormatEAN13
-            ? [WLBarcodeRenderer ean13Modules:message]
-            : [WLBarcodeRenderer code128Modules:message];
+        NSString *modules = nil;
+        switch (card.barcodeFormat) {
+            case WLBarcodeFormatEAN13: modules = [WLBarcodeRenderer ean13Modules:message]; break;
+            case WLBarcodeFormatEAN8:  modules = [WLBarcodeRenderer ean8Modules:message]; break;
+            default:                   modules = [WLBarcodeRenderer code128Modules:message]; break;
+        }
         if (!modules) {
             if (error) *error = @"Не удалось закодировать штрихкод.";
             return nil;
@@ -120,7 +124,7 @@ static NSData *WLIconPNG(WLCard *card, CGFloat side, CGFloat scale) {
         for (NSNumber *scale in @[ @1, @2 ]) {
             UIImage *strip = [WLBarcodeRenderer imageWithModules:modules caption:message size:stripSize scale:scale.floatValue];
             NSString *name = scale.intValue == 2 ? @"strip@2x.png" : @"strip.png";
-            files[name] = UIImagePNGRepresentation(strip);
+            files[name] = WLPNG(strip);
         }
     }
 

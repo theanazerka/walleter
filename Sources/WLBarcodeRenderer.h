@@ -6,10 +6,14 @@
 + (NSString *)ean13ValidationError:(NSString *)number;
 /// 12 или 13 цифр -> 13 цифр с контрольной; nil, если некорректно
 + (NSString *)ean13FullNumber:(NSString *)number;
++ (NSString *)ean8ValidationError:(NSString *)number;
+/// 7 или 8 цифр -> 8 цифр с контрольной; nil, если некорректно
++ (NSString *)ean8FullNumber:(NSString *)number;
 + (NSString *)code128ValidationError:(NSString *)text;
 
 /// Строка модулей '1'/'0' без тихих зон; nil, если закодировать нельзя
 + (NSString *)ean13Modules:(NSString *)number;
++ (NSString *)ean8Modules:(NSString *)number;
 + (NSString *)code128Modules:(NSString *)text;
 
 /// Картинка штрихкода на белой плашке. size — в точках, scale — 1 или 2.

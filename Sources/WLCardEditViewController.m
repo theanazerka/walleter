@@ -1,28 +1,43 @@
 #import "WLCardEditViewController.h"
 #import "WLOptionPickerViewController.h"
+#import "WLStorePickerViewController.h"
+#import "WLScannerViewController.h"
+#import "WLPassbookPresenter.h"
 #import "WLCardStore.h"
-#import "WLPassBuilder.h"
+#import "WLBrand.h"
 #import "WLColors.h"
-#import <PassKit/PassKit.h>
+#import "WLIcon.h"
 
-enum { WLSectionCard, WLSectionBarcode, WLSectionColor, WLSectionNotes, WLSectionActions, WLSectionCount };
+enum { WLSectionCard, WLSectionBarcode, WLSectionLook, WLSectionNotes, WLSectionActions, WLSectionCount };
+enum { WLRowBrand, WLRowStoreName, WLRowNumber, WLRowHolder };
+enum { WLRowFormat, WLRowScan, WLRowPhotoScan };
+enum { WLRowColor, WLRowLogo };
 enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
+enum { WLSheetDelete = 100, WLSheetLogo };
+enum { WLPickBarcode, WLPickLogo };
 
-@interface WLCardEditViewController () <UITextFieldDelegate, UIActionSheetDelegate, PKAddPassesViewControllerDelegate>
+@interface WLCardEditViewController () <UITextFieldDelegate, UIActionSheetDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @end
 
 @implementation WLCardEditViewController {
     WLCard *_card;
     BOOL _isNew;
+    BOOL _hasCamera;
+    NSInteger _pickPurpose;
     NSMutableDictionary *_fieldCells;   // tag -> UITableViewCell
 }
 
 - (id)initWithCard:(WLCard *)card {
+    return [self initWithCard:card isNew:(card == nil)];
+}
+
+- (id)initWithCard:(WLCard *)card isNew:(BOOL)isNew {
     if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
-        _isNew = (card == nil);
+        _isNew = isNew;
         _card = card ? [card copy] : [WLCard newCard];
         _fieldCells = [NSMutableDictionary dictionary];
-        self.title = _isNew ? @"Новая карта" : card.storeName;
+        _hasCamera = [WLScannerViewController isCameraAvailable];
+        self.title = _isNew ? @"Новая карта" : _card.storeName;
     }
     return self;
 }
@@ -32,17 +47,27 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Сохранить" style:UIBarButtonItemStyleDone target:self action:@selector(saveTapped)];
 }
 
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    if (_isNew && _card.storeName.length == 0) {
-        [[self textFieldWithTag:WLFieldStore] becomeFirstResponder];
-    }
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self syncFields];
+    [self.tableView reloadData];
 }
 
-#pragma mark - Fields
+- (void)alert:(NSString *)title message:(NSString *)message {
+    [[[UIAlertView alloc] initWithTitle:title message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
+}
+
+#pragma mark - Поля ввода
 
 - (UITextField *)textFieldWithTag:(NSInteger)tag {
     return (UITextField *)[[self fieldCellForTag:tag] viewWithTag:tag];
+}
+
+- (void)syncFields {
+    [self textFieldWithTag:WLFieldStore].text = _card.storeName;
+    [self textFieldWithTag:WLFieldNumber].text = _card.cardNumber;
+    [self textFieldWithTag:WLFieldHolder].text = _card.holderName;
+    [self textFieldWithTag:WLFieldNotes].text = _card.notes;
 }
 
 - (UITableViewCell *)fieldCellForTag:(NSInteger)tag {
@@ -65,15 +90,13 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
 
     switch (tag) {
         case WLFieldStore:
-            cell.textLabel.text = @"Магазин";
-            field.placeholder = @"Например, Пятёрочка";
-            field.text = _card.storeName;
+            cell.textLabel.text = @"Название";
+            field.placeholder = @"Как подписать карту";
             field.autocapitalizationType = UITextAutocapitalizationTypeWords;
             break;
         case WLFieldNumber:
             cell.textLabel.text = @"Номер";
             field.placeholder = @"Цифры под штрихкодом";
-            field.text = _card.cardNumber;
             field.autocorrectionType = UITextAutocorrectionTypeNo;
             field.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
             field.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
@@ -81,13 +104,11 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
         case WLFieldHolder:
             cell.textLabel.text = @"Владелец";
             field.placeholder = @"Необязательно";
-            field.text = _card.holderName;
             field.autocapitalizationType = UITextAutocapitalizationTypeWords;
             break;
         case WLFieldNotes:
             cell.textLabel.text = @"Заметка";
             field.placeholder = @"Скидка 5%, PIN и т.п.";
-            field.text = _card.notes;
             field.returnKeyType = UIReturnKeyDone;
             break;
     }
@@ -107,16 +128,15 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
-    NSInteger next = textField.tag == WLFieldHolder ? WLFieldNotes : textField.tag + 1;
     if (textField.tag < WLFieldNotes) {
-        [[self textFieldWithTag:next] becomeFirstResponder];
+        [[self textFieldWithTag:textField.tag + 1] becomeFirstResponder];
     } else {
         [textField resignFirstResponder];
     }
     return YES;
 }
 
-#pragma mark - Table
+#pragma mark - Таблица
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return WLSectionCount;
@@ -124,7 +144,9 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     switch (section) {
-        case WLSectionCard:    return 3;
+        case WLSectionCard:    return 4;
+        case WLSectionBarcode: return 3;
+        case WLSectionLook:    return 2;
         case WLSectionActions: return _isNew ? 1 : 2;
         default:               return 1;
     }
@@ -134,63 +156,85 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
     switch (section) {
         case WLSectionCard:    return @"Карта";
         case WLSectionBarcode: return @"Штрихкод";
-        case WLSectionColor:   return @"Оформление";
+        case WLSectionLook:    return @"Оформление";
         default:               return nil;
     }
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == WLSectionBarcode) {
-        return WLBarcodeFormatIsLinear(_card.barcodeFormat)
-            ? @"Passbook в iOS 6 не умеет линейные штрихкоды, поэтому Walleter нарисует его картинкой на карте."
-            : nil;
+    if (section == WLSectionBarcode && WLBarcodeFormatIsLinear(_card.barcodeFormat)) {
+        return @"Passbook в iOS 6 не умеет линейные штрихкоды, поэтому Walleter нарисует его картинкой на карте.";
     }
-    if (section == WLSectionActions) {
-        return @"Для добавления в Passbook нужен твик SigPass.";
-    }
+    if (section == WLSectionActions) return @"Для добавления в Passbook нужен твик SigPass.";
     return nil;
 }
 
+- (UITableViewCell *)valueCell:(UITableView *)tableView {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"value"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"value"];
+    }
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.imageView.image = nil;
+    cell.detailTextLabel.text = nil;
+    return cell;
+}
+
+- (UITableViewCell *)buttonCell:(UITableView *)tableView title:(NSString *)title color:(UIColor *)color {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"action"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"action"];
+        cell.textLabel.textAlignment = NSTextAlignmentCenter;
+        cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
+    }
+    cell.textLabel.text = title;
+    cell.textLabel.textColor = color;
+    return cell;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UIColor *blue = [UIColor colorWithRed:0.10 green:0.40 blue:0.80 alpha:1];
     switch (indexPath.section) {
-        case WLSectionCard:
-            return [self fieldCellForTag:WLFieldStore + indexPath.row];
+        case WLSectionCard: {
+            if (indexPath.row == WLRowBrand) {
+                UITableViewCell *cell = [self valueCell:tableView];
+                cell.textLabel.text = @"Магазин";
+                cell.detailTextLabel.text = _card.brand ? _card.brand.name : @"Другой";
+                cell.imageView.image = [_card iconWithSide:30 scale:0];
+                return cell;
+            }
+            return [self fieldCellForTag:WLFieldStore + (indexPath.row - WLRowStoreName)];
+        }
         case WLSectionNotes:
             return [self fieldCellForTag:WLFieldNotes];
-        case WLSectionBarcode:
-        case WLSectionColor: {
-            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"value"];
-            if (!cell) {
-                cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"value"];
-                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            }
-            if (indexPath.section == WLSectionBarcode) {
+        case WLSectionBarcode: {
+            if (indexPath.row == WLRowFormat) {
+                UITableViewCell *cell = [self valueCell:tableView];
                 cell.textLabel.text = @"Тип";
                 cell.detailTextLabel.text = WLBarcodeFormatName(_card.barcodeFormat);
-                cell.imageView.image = nil;
-            } else {
+                return cell;
+            }
+            if (indexPath.row == WLRowScan) {
+                return [self buttonCell:tableView title:@"Сканировать камерой" color:_hasCamera ? blue : [UIColor grayColor]];
+            }
+            return [self buttonCell:tableView title:@"Распознать с фото" color:blue];
+        }
+        case WLSectionLook: {
+            UITableViewCell *cell = [self valueCell:tableView];
+            if (indexPath.row == WLRowColor) {
                 cell.textLabel.text = @"Цвет";
-                cell.detailTextLabel.text = WLColorName(_card.colorIndex);
-                cell.imageView.image = WLColorSwatch(_card.colorIndex, 28);
-            }
-            return cell;
-        }
-        default: {
-            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"action"];
-            if (!cell) {
-                cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"action"];
-                cell.textLabel.textAlignment = NSTextAlignmentCenter;
-                cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
-            }
-            if (indexPath.row == 0) {
-                cell.textLabel.text = @"Добавить в Passbook";
-                cell.textLabel.textColor = [UIColor colorWithRed:0.10 green:0.40 blue:0.80 alpha:1];
+                cell.detailTextLabel.text = _card.usesBrandColors ? @"Фирменный" : WLColorName(MAX(_card.colorIndex, 0));
+                cell.imageView.image = WLIconImage(28, 0, _card.backgroundColor, _card.foregroundColor, @"", nil);
             } else {
-                cell.textLabel.text = @"Удалить карту";
-                cell.textLabel.textColor = [UIColor colorWithRed:0.80 green:0.15 blue:0.15 alpha:1];
+                cell.textLabel.text = @"Логотип";
+                cell.detailTextLabel.text = _card.hasCustomLogo ? @"Свой" : (_card.brand ? @"Значок магазина" : @"Буква");
+                cell.imageView.image = [_card iconWithSide:28 scale:0];
             }
             return cell;
         }
+        default:
+            if (indexPath.row == 0) return [self buttonCell:tableView title:@"Добавить в Passbook" color:blue];
+            return [self buttonCell:tableView title:@"Удалить карту" color:[UIColor colorWithRed:0.80 green:0.15 blue:0.15 alpha:1]];
     }
 }
 
@@ -200,16 +244,20 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
 
     switch (indexPath.section) {
         case WLSectionCard:
-            [[self textFieldWithTag:WLFieldStore + indexPath.row] becomeFirstResponder];
+            if (indexPath.row == WLRowBrand) [self pickBrand];
+            else [[self textFieldWithTag:WLFieldStore + (indexPath.row - WLRowStoreName)] becomeFirstResponder];
             break;
         case WLSectionNotes:
             [[self textFieldWithTag:WLFieldNotes] becomeFirstResponder];
             break;
         case WLSectionBarcode:
-            [self pickBarcodeFormat];
+            if (indexPath.row == WLRowFormat) [self pickBarcodeFormat];
+            else if (indexPath.row == WLRowScan) { if (_hasCamera) [self scan]; }
+            else [self pickImageFor:WLPickBarcode];
             break;
-        case WLSectionColor:
-            [self pickColor];
+        case WLSectionLook:
+            if (indexPath.row == WLRowColor) [self pickColor];
+            else [self chooseLogo];
             break;
         case WLSectionActions:
             if (indexPath.row == 0) [self addToPassbook];
@@ -218,60 +266,139 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
     }
 }
 
-#pragma mark - Pickers
+#pragma mark - Выбор значений
+
+- (void)pickBrand {
+    __weak WLCardEditViewController *weakSelf = self;
+    WLStorePickerViewController *picker = [[WLStorePickerViewController alloc] initWithPrompt:nil selected:_card.brandId completion:^(WLBrand *brand) {
+        WLCardEditViewController *me = weakSelf;
+        if (!me) return;
+        WLCard *card = me->_card;
+        NSString *oldBrandName = card.brand.name;
+        card.brandId = brand.identifier;
+        if (brand) {
+            // название подставляем, если оно пустое или было от прошлого пресета
+            if (card.storeName.length == 0 || [card.storeName isEqualToString:oldBrandName]) card.storeName = brand.name;
+            card.colorIndex = -1;
+        } else if (card.colorIndex < 0) {
+            card.colorIndex = 0;
+        }
+        [me.navigationController popViewControllerAnimated:YES];
+        if (!brand) [[me textFieldWithTag:WLFieldStore] performSelector:@selector(becomeFirstResponder) withObject:nil afterDelay:0.5];
+    }];
+    [self.navigationController pushViewController:picker animated:YES];
+}
 
 - (void)pickBarcodeFormat {
+    NSArray *order = WLBarcodeFormatDisplayOrder();
     NSMutableArray *names = [NSMutableArray array];
-    for (NSInteger i = 0; i < WLBarcodeFormatCount; i++) [names addObject:WLBarcodeFormatName(i)];
+    for (NSNumber *f in order) [names addObject:WLBarcodeFormatName(f.integerValue)];
     __weak WLCardEditViewController *weakSelf = self;
     WLOptionPickerViewController *picker = [[WLOptionPickerViewController alloc]
         initWithTitle:@"Штрихкод"
               options:names
                images:nil
-             selected:_card.barcodeFormat
-               footer:@"Большинство скидочных карт — EAN-13 (13 цифр). Если цифр другое количество или есть буквы — Code 128."
+             selected:[order indexOfObject:@(_card.barcodeFormat)]
+               footer:@"Проще всего — отсканировать карту камерой, тип определится сам. Большинство скидочных карт — EAN-13 (13 цифр)."
            completion:^(NSInteger index) {
-               WLCardEditViewController *strongSelf = weakSelf;
-               if (!strongSelf) return;
-               strongSelf->_card.barcodeFormat = index;
-               [strongSelf.tableView reloadData];
+               WLCardEditViewController *me = weakSelf;
+               if (me) me->_card.barcodeFormat = [order[index] integerValue];
            }];
     [self.navigationController pushViewController:picker animated:YES];
 }
 
 - (void)pickColor {
+    BOOL hasBrand = _card.brand != nil;
     NSMutableArray *names = [NSMutableArray array], *images = [NSMutableArray array];
+    if (hasBrand) {
+        [names addObject:@"Фирменный"];
+        [images addObject:[_card.brand iconWithSide:28]];
+    }
     for (NSInteger i = 0; i < WLColorCount(); i++) {
         [names addObject:WLColorName(i)];
         [images addObject:WLColorSwatch(i, 28)];
     }
+    NSInteger offset = hasBrand ? 1 : 0;
+    NSInteger selected = _card.usesBrandColors ? 0 : MAX(_card.colorIndex, 0) + offset;
     __weak WLCardEditViewController *weakSelf = self;
     WLOptionPickerViewController *picker = [[WLOptionPickerViewController alloc]
-        initWithTitle:@"Цвет карты"
-              options:names
-               images:images
-             selected:_card.colorIndex
-               footer:nil
+        initWithTitle:@"Цвет карты" options:names images:images selected:selected footer:nil
            completion:^(NSInteger index) {
-               WLCardEditViewController *strongSelf = weakSelf;
-               if (!strongSelf) return;
-               strongSelf->_card.colorIndex = index;
-               [strongSelf.tableView reloadData];
+               WLCardEditViewController *me = weakSelf;
+               if (me) me->_card.colorIndex = index - offset;   // -1 => фирменный
            }];
     [self.navigationController pushViewController:picker animated:YES];
 }
 
-#pragma mark - Actions
-
-- (void)showAlert:(NSString *)title message:(NSString *)message {
-    [[[UIAlertView alloc] initWithTitle:title message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
+- (void)chooseLogo {
+    UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:@"Логотип на карте" delegate:self cancelButtonTitle:nil destructiveButtonTitle:nil otherButtonTitles:@"Выбрать из фото", nil];
+    if (_card.hasCustomLogo) sheet.destructiveButtonIndex = [sheet addButtonWithTitle:@"Убрать свой логотип"];
+    sheet.cancelButtonIndex = [sheet addButtonWithTitle:@"Отмена"];
+    sheet.tag = WLSheetLogo;
+    [sheet showInView:self.view];
 }
+
+#pragma mark - Сканирование и фото
+
+- (void)applyScanResult:(WLScanResult *)result {
+    _card.cardNumber = result.text;
+    _card.barcodeFormat = result.format;
+    [self syncFields];
+    [self.tableView reloadData];
+}
+
+- (void)scan {
+    __weak WLCardEditViewController *weakSelf = self;
+    WLScannerViewController *scanner = [[WLScannerViewController alloc] initWithCompletion:^(WLScanResult *result) {
+        WLCardEditViewController *me = weakSelf;
+        if (result) [me applyScanResult:result];
+        [me dismissViewControllerAnimated:YES completion:nil];
+    }];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:scanner];
+    nav.navigationBar.barStyle = UIBarStyleBlackTranslucent;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)pickImageFor:(NSInteger)purpose {
+    if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]) return;
+    _pickPurpose = purpose;
+    UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+    picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+    picker.allowsEditing = (purpose == WLPickLogo);   // для логотипа даём обрезать
+    picker.delegate = self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info {
+    UIImage *image = info[UIImagePickerControllerEditedImage] ?: info[UIImagePickerControllerOriginalImage];
+    [self dismissViewControllerAnimated:YES completion:nil];
+    if (!image) return;
+
+    if (_pickPurpose == WLPickLogo) {
+        [[WLCardStore sharedStore] setCustomLogo:image forCard:_card];
+        [self.tableView reloadData];
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        WLScanResult *result = [[[WLBarcodeDecoder alloc] init] decodeImage:image];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (result) [self applyScanResult:result];
+            else [self alert:@"Штрихкод не найден" message:@"Попробуйте более чёткое фото или скриншот."];
+        });
+    });
+}
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+#pragma mark - Сохранение и Passbook
 
 - (BOOL)validateAndSave {
     [self.view endEditing:YES];
     NSString *error = [_card validationError];
     if (error) {
-        [self showAlert:@"Проверьте карту" message:error];
+        [self alert:@"Проверьте карту" message:error];
         return NO;
     }
     [[WLCardStore sharedStore] saveCard:_card];
@@ -284,46 +411,12 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
 }
 
 - (void)saveTapped {
-    if ([self validateAndSave]) {
-        [self.navigationController popViewControllerAnimated:YES];
-    }
+    if ([self validateAndSave]) [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (void)addToPassbook {
     if (![self validateAndSave]) return;
-
-    if (NSClassFromString(@"PKPassLibrary") == nil || ![PKPassLibrary isPassLibraryAvailable]) {
-        [self showAlert:@"Passbook недоступен" message:@"На этом устройстве нет Passbook (например, на iPad в iOS 6)."];
-        return;
-    }
-
-    NSString *buildError = nil;
-    NSData *data = [WLPassBuilder pkpassDataForCard:_card error:&buildError];
-    if (!data) {
-        [self showAlert:@"Не получилось" message:buildError];
-        return;
-    }
-
-    NSError *passError = nil;
-    PKPass *pass = [[PKPass alloc] initWithData:data error:&passError];
-    if (!pass) {
-        NSString *msg = [NSString stringWithFormat:@"Passbook отклонил карту%@.\n\nУбедитесь, что установлен твик SigPass, и перезагрузите устройство (или сделайте respring).",
-                         passError ? [NSString stringWithFormat:@" (%@)", passError.localizedDescription] : @""];
-        [self showAlert:@"Ошибка Passbook" message:msg];
-        return;
-    }
-
-    PKAddPassesViewController *add = [[PKAddPassesViewController alloc] initWithPass:pass];
-    if (!add) {
-        [self showAlert:@"Ошибка Passbook" message:@"Не удалось открыть экран добавления карты."];
-        return;
-    }
-    add.delegate = self;
-    [self presentViewController:add animated:YES completion:nil];
-}
-
-- (void)addPassesViewControllerDidFinish:(PKAddPassesViewController *)controller {
-    [self dismissViewControllerAnimated:YES completion:nil];
+    [WLPassbookPresenter addCard:_card fromViewController:self];
 }
 
 - (void)confirmDelete {
@@ -332,13 +425,24 @@ enum { WLFieldStore = 1, WLFieldNumber, WLFieldHolder, WLFieldNotes };
                                               cancelButtonTitle:@"Отмена"
                                          destructiveButtonTitle:@"Удалить"
                                               otherButtonTitles:nil];
+    sheet.tag = WLSheetDelete;
     [sheet showInView:self.view];
 }
 
 - (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex {
+    if (buttonIndex == actionSheet.cancelButtonIndex) return;
+    if (actionSheet.tag == WLSheetDelete) {
+        if (buttonIndex == actionSheet.destructiveButtonIndex) {
+            [[WLCardStore sharedStore] removeCard:_card];
+            [self.navigationController popViewControllerAnimated:YES];
+        }
+        return;
+    }
     if (buttonIndex == actionSheet.destructiveButtonIndex) {
-        [[WLCardStore sharedStore] removeCard:_card];
-        [self.navigationController popViewControllerAnimated:YES];
+        [[WLCardStore sharedStore] setCustomLogo:nil forCard:_card];
+        [self.tableView reloadData];
+    } else {
+        [self pickImageFor:WLPickLogo];
     }
 }
 
