@@ -48,7 +48,7 @@ https://theanazerka.github.io/walleter/
 
 ## Сборка
 
-Нужен [Theos](https://theos.dev) с iOS-тулчейном и SDK (в CI — iPhoneOS 9.3 SDK,
+Нужен [Theos](https://theos.dev) с iOS-тулчейном и SDK (в CI — iPhoneOS 10.3 SDK,
 deployment target 6.0, `armv7`):
 
 ```sh

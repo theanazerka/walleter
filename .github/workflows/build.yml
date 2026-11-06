@@ -18,7 +18,7 @@ concurrency:
 
 env:
   THEOS: ${{ github.workspace }}/theos
-  SDK_VERSION: "9.3"
+  SDK_VERSION: "10.3"
   # Зафиксированный коммит SigPass (https://github.com/bag-xml/SigPass)
   SIGPASS_COMMIT: 9e860b33c12bf5393d9a9b02c75582d5980f8496
 

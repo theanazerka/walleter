@@ -1,5 +1,5 @@
 # Walleter — скидочные карты в Passbook для iOS 6 (jailbreak, требует SigPass)
-TARGET := iphone:clang:9.3:6.0
+TARGET := iphone:clang:10.3:6.0
 ARCHS := armv7
 INSTALL_TARGET_PROCESSES = Walleter
 
