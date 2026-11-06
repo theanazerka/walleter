@@ -33,6 +33,22 @@ UIImage *WLIconImage(CGFloat side, CGFloat scale, UIColor *background, UIColor *
     return image;
 }
 
+UIImage *WLBadgeImage(UIImage *logo, CGSize size, CGFloat scale, CGFloat cornerRadius) {
+    UIGraphicsBeginImageContextWithOptions(size, NO, scale);
+    CGRect rect = CGRectMake(0, 0, size.width, size.height);
+    [[UIColor whiteColor] setFill];
+    [[UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:cornerRadius] fill];
+    CGFloat pad = MIN(size.width, size.height) * 0.12;
+    CGRect box = CGRectInset(rect, pad, pad);
+    CGSize s = logo.size;
+    CGFloat k = MIN(box.size.width / MAX(s.width, 1), box.size.height / MAX(s.height, 1));
+    CGSize d = CGSizeMake(s.width * k, s.height * k);
+    [logo drawInRect:CGRectMake(box.origin.x + (box.size.width - d.width) / 2, box.origin.y + (box.size.height - d.height) / 2, d.width, d.height)];
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+
 UIImage *WLFitImage(UIImage *image, CGSize maxSize, CGFloat scale) {
     CGSize s = image.size;
     CGFloat k = MIN(maxSize.width / MAX(s.width, 1), maxSize.height / MAX(s.height, 1));

@@ -3,7 +3,7 @@
 
 typedef struct { const char *ident, *name, *glyph; unsigned int bg, fg; } WLBrandEntry;
 
-// Цвета подобраны «по памяти» под фирменные; логотипы не используются — только буквы.
+// Цвета — под фирменные; логотипы лежат в Resources/Brands/<id>.png, буквы — запасной вариант.
 static const WLBrandEntry kBrands[] = {
     { "pyaterochka", "Пятёрочка",       "5",   0xE31E24, 0xFFFFFF },
     { "magnit",      "Магнит",          "М",   0xD6001C, 0xFFFFFF },
@@ -38,7 +38,10 @@ static UIColor *WLRGB(unsigned int rgb) {
     return [UIColor colorWithRed:((rgb >> 16) & 0xFF) / 255.0 green:((rgb >> 8) & 0xFF) / 255.0 blue:(rgb & 0xFF) / 255.0 alpha:1];
 }
 
-@implementation WLBrand
+@implementation WLBrand {
+    UIImage *_logo;
+    BOOL _logoLoaded;
+}
 
 - (id)initWithEntry:(const WLBrandEntry *)e {
     if ((self = [super init])) {
@@ -72,8 +75,22 @@ static UIColor *WLRGB(unsigned int rgb) {
     return nil;
 }
 
+- (UIImage *)logo {
+    if (!_logoLoaded) {
+        _logoLoaded = YES;
+        NSString *path = [[NSBundle mainBundle] pathForResource:self.identifier ofType:@"png" inDirectory:@"Brands"];
+        _logo = path ? [UIImage imageWithContentsOfFile:path] : nil;
+    }
+    return _logo;
+}
+
+- (UIImage *)iconWithSide:(CGFloat)side scale:(CGFloat)scale {
+    if (self.logo) return WLBadgeImage(self.logo, CGSizeMake(side, side), scale, side * 0.22);
+    return WLIconImage(side, scale, self.backgroundColor, self.foregroundColor, self.glyph, nil);
+}
+
 - (UIImage *)iconWithSide:(CGFloat)side {
-    return WLIconImage(side, 0, self.backgroundColor, self.foregroundColor, self.glyph, nil);
+    return [self iconWithSide:side scale:0];
 }
 
 @end

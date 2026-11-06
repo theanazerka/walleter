@@ -121,7 +121,9 @@ static NSString *WLTrim(NSString *s) {
 }
 
 - (UIImage *)iconWithSide:(CGFloat)side scale:(CGFloat)scale {
-    return WLIconImage(side, scale, self.backgroundColor, self.foregroundColor, [self glyph], [self customLogo]);
+    UIImage *custom = [self customLogo];
+    if (!custom && self.brand.logo) return [self.brand iconWithSide:side scale:scale];
+    return WLIconImage(side, scale, self.backgroundColor, self.foregroundColor, [self glyph], custom);
 }
 
 - (NSString *)validationError {
