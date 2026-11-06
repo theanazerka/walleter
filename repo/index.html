@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walleter Repo</title>
+<style>
+body{font-family:Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:16px;background:#f4f4f4;color:#222}
+.box{background:#fff;border-radius:10px;padding:16px;margin:12px 0;border:1px solid #ddd}
+code{background:#eee;padding:2px 4px;border-radius:4px;word-break:break-all}
+a.btn{display:block;text-align:center;background:#283593;color:#fff;padding:12px;border-radius:8px;text-decoration:none;font-weight:bold}
+</style>
+</head>
+<body>
+<h1><img src="CydiaIcon.png" width="32" height="32" alt=""> Walleter</h1>
+<div class="box">
+<p>Cydia-репозиторий со скидочными картами для Passbook на iOS 6.</p>
+<p>Добавьте источник в Cydia → Sources → Edit → Add:</p>
+<p><code id="url"></code></p>
+<a class="btn" id="add" href="#">Открыть в Cydia</a>
+</div>
+<div class="box">
+<b>Пакеты</b>
+<ul>
+<li><b>Walleter</b> — приложение: добавляете карту, оно кладёт её в Passbook.</li>
+<li><b>SigPass</b> (bag.xml) — твик, отключающий проверку подписи пассов. Ставится автоматически.</li>
+</ul>
+<p>Список пакетов и пути к .deb — в файле <a href="Packages">Packages</a>.</p>
+</div>
+<script>
+var u = location.href.replace(/index\.html$/, '').replace(/[?#].*$/, '');
+if (u.slice(-1) !== '/') u += '/';
+document.getElementById('url').textContent = u;
+document.getElementById('add').href = 'cydia://url/https://cydia.saurik.com/api/share#?source=' + encodeURIComponent(u);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+Package: com.theanazerka.walleter
+Name: Walleter
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Скидочные карты в Passbook на iOS 6. Добавьте карту магазина — приложение соберёт .pkpass и положит его в Passbook (подпись обходится твиком SigPass).
+Maintainer: theanazerka
+Author: theanazerka
+Section: Utilities
+Depends: firmware (>= 6.0), bag.xml.sigpass
+Homepage: https://github.com/theanazerka/walleter

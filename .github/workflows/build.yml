@@ -1,0 +1,123 @@
+name: Build & Cydia repo
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+  SDK_VERSION: "9.3"
+  # Зафиксированный коммит SigPass (https://github.com/bag-xml/SigPass)
+  SIGPASS_COMMIT: 9e860b33c12bf5393d9a9b02c75582d5980f8496
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: walleter
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential fakeroot rsync curl perl zip git libxml2 xz-utils dpkg-dev bzip2
+
+      - name: Cache Theos toolchain and SDK
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: |
+            theos-toolchain
+            theos-sdks
+          key: theos-linux-toolchain-sdk${{ env.SDK_VERSION }}-v1
+
+      - name: Download toolchain and SDK
+        if: steps.cache-theos.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p theos-toolchain theos-sdks
+          curl -fsSL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            | tar -xJ -C theos-toolchain
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git sdks-src
+          git -C sdks-src sparse-checkout set "iPhoneOS${SDK_VERSION}.sdk"
+          mv "sdks-src/iPhoneOS${SDK_VERSION}.sdk" theos-sdks/
+
+      - name: Set up Theos
+        run: |
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          mkdir -p "$THEOS/toolchain" "$THEOS/sdks"
+          cp -a theos-toolchain/. "$THEOS/toolchain/"
+          cp -a theos-sdks/. "$THEOS/sdks/"
+          ls "$THEOS/toolchain/linux/iphone/bin" | head -5
+          ls "$THEOS/sdks"
+
+      - name: Build Walleter
+        working-directory: walleter
+        run: |
+          VERSION="$(grep '^Version:' control | cut -d' ' -f2)"
+          make package FINALPACKAGE=1 PACKAGE_VERSION="$VERSION-${{ github.run_number }}"
+          ls -la packages
+
+      - name: Build SigPass (iOS 6, armv7)
+        run: |
+          git clone https://github.com/bag-xml/SigPass.git sigpass
+          git -C sigpass checkout "$SIGPASS_COMMIT"
+          cd sigpass
+          make package FINALPACKAGE=1 \
+            TARGET=iphone:clang:${SDK_VERSION}:6.0 ARCHS=armv7 \
+            THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
+          ls -la packages
+
+      - name: Build Cydia repo
+        run: |
+          mkdir -p debs
+          cp walleter/packages/*.deb sigpass/packages/*.deb debs/
+          for d in debs/*.deb; do echo "== $d"; dpkg-deb -I "$d"; dpkg-deb -c "$d"; done
+          walleter/scripts/build_repo.sh debs site
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs
+          path: debs/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cydia-repo
+          path: site
+          include-hidden-files: true
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Attach debs to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: debs/*.deb
+
+  deploy:
+    # Репозиторий публикуется из основной ветки (или вручную через Run workflow)
+    if: github.event_name != 'pull_request' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'workflow_dispatch')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
