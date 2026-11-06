@@ -77,7 +77,8 @@ jobs:
           cd sigpass
           make package FINALPACKAGE=1 \
             TARGET=iphone:clang:${SDK_VERSION}:6.0 ARCHS=armv7 \
-            THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
+            THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip \
+            SigPass_LDFLAGS="-Wl,-U,_objc_msgSend_stret -Wl,-U,__Unwind_SjLj_Register -Wl,-U,__Unwind_SjLj_Unregister -Wl,-U,__Unwind_SjLj_Resume"
           ls -la packages
 
       - name: Build Cydia repo
